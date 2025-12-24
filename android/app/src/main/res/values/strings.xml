@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Blitz Score</string>
+    <string name="title_activity_main">Blitz Score</string>
+    <string name="package_name">com.blitzscore.app</string>
+    <string name="custom_url_scheme">com.blitzscore.app</string>
+</resources>
