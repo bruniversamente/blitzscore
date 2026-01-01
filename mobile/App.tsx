@@ -23,6 +23,7 @@ const HISTORY_KEY = 'blitzScoreHistory_v1';
 const AUTH_KEY = 'blitzScoreAuth_v1';
 const SETUP_KEY = 'blitzScoreSetup_v1';
 const TARGET_OPTIONS = [75, 100, 125, 150, 175, 200];
+const ROUND_OPTIONS = [5, 10, 15, 20, 25, 30];
 
 const logo = require('./assets/logo.jpg');
 
@@ -47,6 +48,8 @@ export default function App() {
     const [rounds, setRounds] = useState<Round[]>([]);
     const [history, setHistory] = useState<MatchEntry[]>([]);
     const [targetScore, setTargetScore] = useState(75);
+    const [gameMode, setGameMode] = useState<'score' | 'rounds'>('score');
+    const [targetRounds, setTargetRounds] = useState(10);
     const [showChart, setShowChart] = useState(false);
     const [scoringModal, setScoringModal] = useState<{ roundId: string; playerId: string } | null>(null);
     const [personaModalFor, setPersonaModalFor] = useState<string | null>(null);
@@ -71,9 +74,9 @@ export default function App() {
 
     useEffect(() => {
         if (players.length > 0) {
-            AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ players, rounds }));
+            AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ players, rounds, gameMode, targetScore, targetRounds }));
         }
-    }, [players, rounds]);
+    }, [players, rounds, gameMode, targetScore, targetRounds]);
 
     useEffect(() => {
         AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(history));
@@ -94,6 +97,9 @@ export default function App() {
                 if (Array.isArray(parsed.players) && Array.isArray(parsed.rounds)) {
                     setPlayers(parsed.players);
                     setRounds(parsed.rounds);
+                    if (parsed.gameMode) setGameMode(parsed.gameMode);
+                    if (parsed.targetScore) setTargetScore(parsed.targetScore);
+                    if (parsed.targetRounds) setTargetRounds(parsed.targetRounds);
                 }
             }
             if (rawHist) setHistory(JSON.parse(rawHist));
@@ -126,8 +132,19 @@ export default function App() {
             color: p.color || personaOptions[0].color,
         })) as Player[];
 
+        let initialRounds: Round[] = [];
+        if (gameMode === 'score') {
+            initialRounds = [{ id: 'r1', label: '1', scores: Object.fromEntries(validPlayers.map((p) => [p.id, ''])) }];
+        } else {
+            initialRounds = Array.from({ length: targetRounds }, (_, i) => ({
+                id: `r${i + 1}`,
+                label: String(i + 1),
+                scores: Object.fromEntries(validPlayers.map((p) => [p.id, '']))
+            }));
+        }
+
         setPlayers(validPlayers);
-        setRounds([{ id: 'r1', label: '1', scores: Object.fromEntries(validPlayers.map((p) => [p.id, ''])) }]);
+        setRounds(initialRounds);
         setIsSetupComplete(true);
         await AsyncStorage.setItem(SETUP_KEY, 'true');
     };
@@ -165,6 +182,24 @@ export default function App() {
     };
 
     const addRound = () => {
+        if (gameMode === 'rounds' && rounds.length >= targetRounds) {
+            Alert.alert(
+                'Limite atingido',
+                `A meta era ${targetRounds} rodadas. Deseja continuar mesmo assim?`,
+                [
+                    { text: 'Cancelar', style: 'cancel' },
+                    {
+                        text: 'Continuar', onPress: () => {
+                            setRounds((p) => [
+                                ...p,
+                                { id: `r_${Date.now()}`, label: String(p.length + 1), scores: Object.fromEntries(players.map((pl) => [pl.id, ''])) },
+                            ]);
+                        }
+                    }
+                ]
+            );
+            return;
+        }
         setRounds((p) => [
             ...p,
             { id: `r_${Date.now()}`, label: String(p.length + 1), scores: Object.fromEntries(players.map((pl) => [pl.id, ''])) },
@@ -310,6 +345,39 @@ export default function App() {
                         <Text style={styles.setupAddText}>+ Adicionar Jogador</Text>
                     </TouchableOpacity>
                 )}
+
+                <View style={styles.setupModeSection}>
+                    <Text style={styles.setupPlayerLabel}>MODO DE JOGO</Text>
+                    <View style={styles.setupModeToggles}>
+                        <TouchableOpacity
+                            style={[styles.setupModeToggle, gameMode === 'score' && styles.setupModeToggleActive]}
+                            onPress={() => setGameMode('score')}
+                        >
+                            <Text style={[styles.setupModeToggleText, gameMode === 'score' && styles.setupModeToggleTextActive]}>Por Pontos</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.setupModeToggle, gameMode === 'rounds' && styles.setupModeToggleActive]}
+                            onPress={() => setGameMode('rounds')}
+                        >
+                            <Text style={[styles.setupModeToggleText, gameMode === 'rounds' && styles.setupModeToggleTextActive]}>Por Rodadas</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.setupOptionsScroll}>
+                        {(gameMode === 'score' ? TARGET_OPTIONS : ROUND_OPTIONS).map((opt) => (
+                            <TouchableOpacity
+                                key={opt}
+                                style={[styles.setupOptionItem, (gameMode === 'score' ? targetScore : targetRounds) === opt && styles.setupOptionItemActive]}
+                                onPress={() => gameMode === 'score' ? setTargetScore(opt) : setTargetRounds(opt)}
+                            >
+                                <Text style={[styles.setupOptionItemText, (gameMode === 'score' ? targetScore : targetRounds) === opt && styles.setupOptionItemTextActive]}>
+                                    {opt}{gameMode === 'score' ? ' pts' : ' rds'}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                </View>
+
                 <TouchableOpacity style={styles.setupStartBtn} onPress={handleSetupComplete}>
                     <Text style={styles.setupStartText}>Iniciar Partida</Text>
                 </TouchableOpacity>
@@ -419,11 +487,21 @@ export default function App() {
                                     <View style={styles.tableHeaderCell}>
                                         <Text style={styles.tableHeaderText}>RD</Text>
                                     </View>
-                                    {[...players].sort((a, b) => (totals[b.id] || 0) - (totals[a.id] || 0)).map((p) => (
+                                    {players.map((p) => (
                                         <View key={p.id} style={styles.tableHeaderCell}>
                                             <Text style={[styles.tablePlayerName, { color: p.color }]}>{p.name}</Text>
                                             <View style={styles.progressBar}>
-                                                <View style={[styles.progressFill, { width: `${Math.min((totals[p.id] || 0) / targetScore * 100, 100)}%`, backgroundColor: p.color }]} />
+                                                <View style={[
+                                                    styles.progressFill,
+                                                    {
+                                                        width: `${Math.min(
+                                                            (gameMode === 'score'
+                                                                ? (totals[p.id] || 0) / targetScore
+                                                                : rounds.length / targetRounds
+                                                            ) * 100, 100)}%`,
+                                                        backgroundColor: p.color
+                                                    }
+                                                ]} />
                                             </View>
                                         </View>
                                     ))}
@@ -434,7 +512,7 @@ export default function App() {
                                         <View style={styles.tableCell}>
                                             <Text style={styles.roundLabel}>{r.label}</Text>
                                         </View>
-                                        {[...players].sort((a, b) => (totals[b.id] || 0) - (totals[a.id] || 0)).map((p) => (
+                                        {players.map((p) => (
                                             <TouchableOpacity
                                                 key={p.id}
                                                 style={styles.scoreCell}
@@ -456,11 +534,25 @@ export default function App() {
                     <View style={styles.panelHeader}>
                         <Text style={styles.panelTitle}>Liderança</Text>
                         <TouchableOpacity onPress={() => {
-                            const currentIndex = TARGET_OPTIONS.indexOf(targetScore);
-                            const nextIndex = (currentIndex + 1) % TARGET_OPTIONS.length;
-                            setTargetScore(TARGET_OPTIONS[nextIndex]);
+                            if (gameMode === 'score') {
+                                const currentIndex = TARGET_OPTIONS.indexOf(targetScore);
+                                if (currentIndex === TARGET_OPTIONS.length - 1) {
+                                    setGameMode('rounds');
+                                } else {
+                                    setTargetScore(TARGET_OPTIONS[currentIndex + 1]);
+                                }
+                            } else {
+                                const currentIndex = ROUND_OPTIONS.indexOf(targetRounds);
+                                if (currentIndex === ROUND_OPTIONS.length - 1) {
+                                    setGameMode('score');
+                                } else {
+                                    setTargetRounds(ROUND_OPTIONS[currentIndex + 1]);
+                                }
+                            }
                         }}>
-                            <Text style={styles.metaText}>META {targetScore} ▼</Text>
+                            <Text style={styles.metaText}>
+                                {gameMode === 'score' ? `META ${targetScore} PTS` : `META ${targetRounds} RDS`} ▼
+                            </Text>
                         </TouchableOpacity>
                     </View>
                     {players.map((p) => {
@@ -473,7 +565,11 @@ export default function App() {
                                 </View>
                                 <Text style={styles.leaderName}>{p.name}</Text>
                                 <Text style={styles.leaderScore}>{total}</Text>
-                                {total >= targetScore && <Text style={styles.blitzBadge}>BLITZ!</Text>}
+                                {gameMode === 'score' ? (
+                                    total >= targetScore && <Text style={styles.blitzBadge}>VENCEU!</Text>
+                                ) : (
+                                    rounds.length >= targetRounds && isLeader && <Text style={styles.blitzBadge}>VENCEU!</Text>
+                                )}
                             </View>
                         );
                     })}
@@ -797,6 +893,64 @@ const styles = StyleSheet.create({
     setupStartText: {
         color: '#000',
         fontSize: 16,
+        fontWeight: '700',
+    },
+    setupModeSection: {
+        marginBottom: 20,
+        backgroundColor: 'rgba(255,255,255,0.03)',
+        padding: 15,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+    },
+    setupModeToggles: {
+        flexDirection: 'row',
+        gap: 10,
+        marginVertical: 10,
+    },
+    setupModeToggle: {
+        flex: 1,
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        padding: 10,
+        borderRadius: 10,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: 'transparent',
+    },
+    setupModeToggleActive: {
+        backgroundColor: 'rgba(59, 130, 246, 0.2)',
+        borderColor: '#3b82f6',
+    },
+    setupModeToggleText: {
+        color: '#666',
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    setupModeToggleTextActive: {
+        color: '#3b82f6',
+    },
+    setupOptionsScroll: {
+        marginTop: 5,
+    },
+    setupOptionItem: {
+        paddingHorizontal: 15,
+        paddingVertical: 8,
+        borderRadius: 8,
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        marginRight: 8,
+        borderWidth: 1,
+        borderColor: 'transparent',
+    },
+    setupOptionItemActive: {
+        backgroundColor: '#fff',
+        borderColor: '#fff',
+    },
+    setupOptionItemText: {
+        color: '#666',
+        fontSize: 12,
+    },
+    setupOptionItemTextActive: {
+        color: '#000',
         fontWeight: '700',
     },
 

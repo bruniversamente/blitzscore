@@ -14,6 +14,7 @@ const HISTORY_KEY = "blitzScoreHistory_v1";
 const AUTH_KEY = "blitzScoreAuth_v1";
 const SETUP_KEY = "blitzScoreSetup_v1";
 const TARGET_OPTIONS = [75, 100, 125, 150, 175, 200];
+const ROUND_OPTIONS = [5, 10, 15, 20, 25, 30];
 
 function computeTotals(players: Player[], rounds: Round[]) {
   const totals: Record<string, number> = {};
@@ -43,6 +44,8 @@ export default function BlitzScoreApp() {
   const [scoringFor, setScoringFor] = useState<{ roundId: string, playerId: string } | null>(null);
   const [showChart, setShowChart] = useState(false);
   const [targetScore, setTargetScore] = useState(75);
+  const [gameMode, setGameMode] = useState<'score' | 'rounds'>('score');
+  const [targetRounds, setTargetRounds] = useState(10);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -60,6 +63,9 @@ export default function BlitzScoreApp() {
         if (Array.isArray(parsed.players) && Array.isArray(parsed.rounds)) {
           setPlayers(parsed.players);
           setRounds(parsed.rounds);
+          if (parsed.gameMode) setGameMode(parsed.gameMode);
+          if (parsed.targetScore) setTargetScore(parsed.targetScore);
+          if (parsed.targetRounds) setTargetRounds(parsed.targetRounds);
         }
       }
 
@@ -73,7 +79,13 @@ export default function BlitzScoreApp() {
     if (typeof window === "undefined") return;
     // Só salva se tiver jogadores (evita salvar estado vazio inicial por cima de dados bons)
     if (players.length > 0) {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ players, rounds }));
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        players,
+        rounds,
+        gameMode,
+        targetScore,
+        targetRounds
+      }));
     }
   }, [players, rounds]);
 
@@ -96,9 +108,24 @@ export default function BlitzScoreApp() {
     }
   }
 
-  function handleSetupComplete(initialPlayers: Player[]) {
+  function handleSetupComplete(initialPlayers: Player[], mode: 'score' | 'rounds' = 'score', target: number = 75) {
     setPlayers(initialPlayers);
-    setRounds([{ id: "r1", label: "1", scores: Object.fromEntries(initialPlayers.map(p => [p.id, ""])) }]);
+    setGameMode(mode);
+
+    let initialRounds: Round[] = [];
+    if (mode === 'score') {
+      setTargetScore(target);
+      initialRounds = [{ id: "r1", label: "1", scores: Object.fromEntries(initialPlayers.map(p => [p.id, ""])) }];
+    } else {
+      setTargetRounds(target);
+      initialRounds = Array.from({ length: target }, (_, i) => ({
+        id: `r${i + 1}`,
+        label: String(i + 1),
+        scores: Object.fromEntries(initialPlayers.map(p => [p.id, ""]))
+      }));
+    }
+
+    setRounds(initialRounds);
     setIsSetupComplete(true);
     if (typeof window !== "undefined") {
       window.localStorage.setItem(SETUP_KEY, "true");
@@ -131,6 +158,9 @@ export default function BlitzScoreApp() {
   }
 
   function addRound() {
+    if (gameMode === 'rounds' && rounds.length >= targetRounds) {
+      if (!confirm(`A meta era ${targetRounds} rodadas. Deseja continuar mesmo assim?`)) return;
+    }
     setRounds((p) => [...p, { id: `r_${Date.now()}`, label: String(p.length + 1), scores: Object.fromEntries(players.map(pl => [pl.id, ""])) }]);
   }
 
@@ -171,7 +201,13 @@ export default function BlitzScoreApp() {
 
   // Se não completou o setup OU não tem jogadores (caso tenha dado erro no cache), mostra setup
   if (!isSetupComplete || players.length === 0) {
-    return <PlayerSetupScreen onComplete={handleSetupComplete} />;
+    return (
+      <PlayerSetupScreen
+        onComplete={handleSetupComplete}
+        initialMode={gameMode}
+        initialTarget={gameMode === 'score' ? targetScore : targetRounds}
+      />
+    );
   }
 
   return (
@@ -226,7 +262,15 @@ export default function BlitzScoreApp() {
                           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center" }}>
                             <span style={{ color: p.color, fontSize: 14 }}>{p.name}</span>
                             <div style={{ width: 40, height: 3, background: "rgba(255,255,255,0.1)", borderRadius: 2 }}>
-                              <div style={{ width: `${Math.min((totals[p.id] || 0) / targetScore * 100, 100)}%`, height: "100%", background: p.color }} />
+                              <div style={{
+                                width: `${Math.min(
+                                  (gameMode === 'score'
+                                    ? (totals[p.id] || 0) / targetScore
+                                    : rounds.length / targetRounds
+                                  ) * 100, 100)}%`,
+                                height: "100%",
+                                background: p.color
+                              }} />
                             </div>
                           </div>
                         </th>
@@ -261,12 +305,25 @@ export default function BlitzScoreApp() {
               <h3 style={{ fontSize: 12, fontWeight: 800, color: "var(--text-muted)", textTransform: "uppercase" }}>Liderança</h3>
               <button
                 onClick={() => {
-                  const idx = TARGET_OPTIONS.indexOf(targetScore);
-                  setTargetScore(TARGET_OPTIONS[(idx + 1) % TARGET_OPTIONS.length]);
+                  if (gameMode === 'score') {
+                    const idx = TARGET_OPTIONS.indexOf(targetScore);
+                    if (idx === TARGET_OPTIONS.length - 1) {
+                      setGameMode('rounds');
+                    } else {
+                      setTargetScore(TARGET_OPTIONS[idx + 1]);
+                    }
+                  } else {
+                    const idx = ROUND_OPTIONS.indexOf(targetRounds);
+                    if (idx === ROUND_OPTIONS.length - 1) {
+                      setGameMode('score');
+                    } else {
+                      setTargetRounds(ROUND_OPTIONS[idx + 1]);
+                    }
+                  }
                 }}
                 style={{ background: "none", border: "none", fontSize: 11, fontWeight: 700, color: "var(--blitz-green)", cursor: "pointer" }}
               >
-                META {targetScore} ▼
+                {gameMode === 'score' ? `META ${targetScore} PTS` : `META ${targetRounds} RDS`} ▼
               </button>
             </div>
 
@@ -283,7 +340,11 @@ export default function BlitzScoreApp() {
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <span style={{ fontSize: 22, fontWeight: 900 }}>{total}</span>
-                        {total >= targetScore && <span className="blitz-badge">BLITZ!</span>}
+                        {gameMode === 'score' ? (
+                          total >= targetScore && <span className="blitz-badge">VENCEU!</span>
+                        ) : (
+                          rounds.length >= targetRounds && isLeader && <span className="blitz-badge">VENCEU!</span>
+                        )}
                       </div>
                     </div>
                   </div>

@@ -6,14 +6,25 @@ import { Player } from "@/types/game";
 import { personaOptions } from "@/constants/personas";
 
 interface PlayerSetupScreenProps {
-    onComplete: (players: Player[]) => void;
+    onComplete: (players: Player[], mode: 'score' | 'rounds', target: number) => void;
+    initialMode?: 'score' | 'rounds';
+    initialTarget?: number;
 }
 
-export const PlayerSetupScreen: React.FC<PlayerSetupScreenProps> = ({ onComplete }) => {
+const TARGET_OPTIONS = [75, 100, 125, 150, 175, 200];
+const ROUND_OPTIONS = [5, 10, 15, 20, 25, 30];
+
+export const PlayerSetupScreen: React.FC<PlayerSetupScreenProps> = ({
+    onComplete,
+    initialMode = 'score',
+    initialTarget = 75
+}) => {
     const [setupPlayers, setSetupPlayers] = useState<Partial<Player>[]>([
         { id: "p1", name: "", personaId: "mailman", color: "#c53030" },
         { id: "p2", name: "", personaId: "florist", color: "#2f855a" },
     ]);
+    const [gameMode, setGameMode] = useState<'score' | 'rounds'>(initialMode);
+    const [targetValue, setTargetValue] = useState(initialTarget);
 
     const addPlayer = () => {
         if (setupPlayers.length >= 4) return;
@@ -34,7 +45,6 @@ export const PlayerSetupScreen: React.FC<PlayerSetupScreenProps> = ({ onComplete
     const updatePlayer = (index: number, field: keyof Player, value: string) => {
         const updated = [...setupPlayers];
         updated[index] = { ...updated[index], [field]: value };
-        // Se mudar persona, atualiza a cor automaticamente
         if (field === "personaId") {
             const persona = personaOptions.find(p => p.id === value);
             if (persona) updated[index].color = persona.color;
@@ -43,20 +53,17 @@ export const PlayerSetupScreen: React.FC<PlayerSetupScreenProps> = ({ onComplete
     };
 
     const handleStart = () => {
-        // Validação básica
         const validPlayers = setupPlayers.map((p, i) => ({
             ...p,
             name: p.name?.trim() || `Jogador ${i + 1}`,
-            // Garante que id, personaId e color existam (mecanismo de fallback)
             id: p.id || `p_${Date.now()}_${i}`,
             personaId: p.personaId || personaOptions[0].id,
             color: p.color || personaOptions[0].color
         })) as Player[];
 
-        onComplete(validPlayers);
+        onComplete(validPlayers, gameMode, targetValue);
     };
 
-    // Estado para modal de seleção de persona
     const [selectingPersonaIndex, setSelectingPersonaIndex] = useState<number | null>(null);
 
     return (
@@ -127,6 +134,48 @@ export const PlayerSetupScreen: React.FC<PlayerSetupScreenProps> = ({ onComplete
                         + Adicionar Jogador
                     </button>
                 )}
+
+                <div style={{
+                    marginTop: 32, padding: 20, background: "rgba(255,255,255,0.03)",
+                    borderRadius: 20, border: "1px solid var(--glass-border)"
+                }}>
+                    <label style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 700, display: "block", marginBottom: 12 }}>
+                        MODO DE JOGO
+                    </label>
+                    <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+                        <button
+                            className={`btn ${gameMode === 'score' ? '' : 'alt'}`}
+                            onClick={() => { setGameMode('score'); setTargetValue(75); }}
+                            style={{ flex: 1, fontSize: 13, background: gameMode === 'score' ? 'var(--blitz-blue)' : 'transparent' }}
+                        >
+                            Por Pontos
+                        </button>
+                        <button
+                            className={`btn ${gameMode === 'rounds' ? '' : 'alt'}`}
+                            onClick={() => { setGameMode('rounds'); setTargetValue(10); }}
+                            style={{ flex: 1, fontSize: 13, background: gameMode === 'rounds' ? 'var(--blitz-blue)' : 'transparent' }}
+                        >
+                            Por Rodadas
+                        </button>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+                        {(gameMode === 'score' ? TARGET_OPTIONS : ROUND_OPTIONS).map(opt => (
+                            <button
+                                key={opt}
+                                onClick={() => setTargetValue(opt)}
+                                style={{
+                                    padding: "6px 12px", borderRadius: 8, fontSize: 12, border: "1px solid var(--glass-border)",
+                                    background: targetValue === opt ? "#fff" : "rgba(255,255,255,0.05)",
+                                    color: targetValue === opt ? "#000" : "var(--text-muted)",
+                                    cursor: "pointer", whiteSpace: "nowrap", fontWeight: targetValue === opt ? 700 : 400
+                                }}
+                            >
+                                {opt}{gameMode === 'score' ? ' pts' : ' rds'}
+                            </button>
+                        ))}
+                    </div>
+                </div>
 
                 <button
                     className="btn"
